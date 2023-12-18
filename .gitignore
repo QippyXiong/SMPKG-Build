@@ -1,0 +1,7 @@
+venv
+build
+.vscode
+reports
+models
+.idea
+.git
