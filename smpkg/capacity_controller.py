@@ -1,37 +1,47 @@
-from dataclasses import dataclass, asdict
-from os import PathLike
-from torch.utils.data import DataLoader
-from typing import Any, overload, Union, Optional, Callable, TypeVar
-from datetime import datetime, date
-from torch.optim import SGD
-from torch import nn
-from transformers.optimization import get_linear_schedule_with_warmup
-import torch, gc, numpy
-from sklearn.metrics import classification_report
-from pathlib import Path
-
-from smpkg.attention_evaluator_model import VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator, AttentionEvaluatorModelConfig
-from smpkg.capacity_profile import Profile, ProfileFeature, FeatureCapacityDataset, ProfileCapacity, DatasetPadding, DataPrefetcher
-from smpkg.logger import Logger, logger
+import gc
 import json5
+from dataclasses import dataclass, asdict
+from datetime import datetime
 from functools import wraps
+from os import PathLike
+from pathlib import Path
+from typing import Any, overload, Union, Optional, Callable, TypeVar
+
+import numpy
+import torch
+from sklearn.metrics import classification_report
+from torch import nn
+from torch.optim import SGD
+from torch.utils.data import DataLoader
+from transformers.optimization import get_linear_schedule_with_warmup
+
+from smpkg.attention_evaluator_model import VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator
+from smpkg.capacity_profile import Profile, ProfileFeature, FeatureCapacityDataset, ProfileCapacity, DatasetPadding, \
+    DataPrefetcher
+from smpkg.logger import Logger
+
+
+__all__ = [
+    'CapacityGenerationSettings',
+    'CapacityGenerationController'
+]
 
 
 @dataclass
 class CapacityGenerationSettings:
-    capacity_names: list[str] # 能力名称，无默认初始化空值
-    capacity_levels: list[str] # 能力可选等级，建议从低到高，最低为不包含此能力
-    static_feature_classes: list[str] # 静态特征类型
-    dynamic_feature_classes: list[str] # 动态特征类型
-    dynamic_feature_values: list[str] # 动态特征的可能值
+    capacity_names: list[str]  # 能力名称，无默认初始化空值
+    capacity_levels: list[str]  # 能力可选等级，建议从低到高，最低为不包含此能力
+    static_feature_classes: list[str]  # 静态特征类型
+    dynamic_feature_classes: list[str]  # 动态特征类型
+    dynamic_feature_values: list[str]  # 动态特征的可能值
     # init_null_values: bool = False # 是否初始化空值
 
     def __post_init__(self) -> None:
-        self.capacity_names2id = {name: id for id, name in enumerate(self.capacity_names)}
-        self.capacity_levels2id = {level: id for id, level in enumerate(self.capacity_levels)}
-        self.static_feature_classes2id = {cls: id for id, cls in enumerate(self.static_feature_classes)}
-        self.dynamic_feature_classes2id = {cls: id for id, cls in enumerate(self.dynamic_feature_classes)}
-        self.dynamic_feature_values2id = {value: id for id, value in enumerate(self.dynamic_feature_values)}
+        self.capacity_names2id = {name: i for i, name in enumerate(self.capacity_names)}
+        self.capacity_levels2id = {level: i for i, level in enumerate(self.capacity_levels)}
+        self.static_feature_classes2id = {cls: i for i, cls in enumerate(self.static_feature_classes)}
+        self.dynamic_feature_classes2id = {cls: i for i, cls in enumerate(self.dynamic_feature_classes)}
+        self.dynamic_feature_values2id = {value: i for i, value in enumerate(self.dynamic_feature_values)}
 
         # initialize null values
 
@@ -43,7 +53,9 @@ class CapacityGenerationSettings:
 #             return obj.strftime('%Y-%m-%d')
 #         return json5.JSONEncoder.default(self, obj)
 
+
 method_T = TypeVar('method_T', bound=Callable)
+
 
 def check_model(func: method_T) -> method_T:
     @wraps(func)
@@ -54,11 +66,13 @@ def check_model(func: method_T) -> method_T:
             return func(self, *args, **kargs)
     return wrapper
 
+
 class CapacityGenerationController:
     r"""
     执行模型的创建、训练、预测、保存和加载。
     """
     model: Optional[VanillaCapacityEvaluator]
+
     @overload
     def __init__(
         self,
@@ -67,6 +81,7 @@ class CapacityGenerationController:
         logger: Optional[Logger] = None
     ):
         ...
+
     @overload
     def __init__(
         self,
@@ -76,7 +91,8 @@ class CapacityGenerationController:
     ):
         ...
 
-    def __init__(self,
+    def __init__(
+        self,
         settings: CapacityGenerationSettings,
         model_or_config: Union[VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator] = None,
         logger: Optional[Logger] = None
@@ -194,7 +210,12 @@ class CapacityGenerationController:
     
     class FeatureEmbedder:
         r""" 用于将特征转换为张量 """
-        def __init__(self, feature_cls2id: dict, feature_value2id: Optional[dict] = None, compute_time: Optional[datetime] = None):
+        def __init__(
+            self,
+            feature_cls2id: dict,
+            feature_value2id: Optional[dict] = None,
+            compute_time: Optional[datetime] = None
+        ) -> None:
             self.feature_cls2id = feature_cls2id
             self.feature_value2id = feature_value2id
             self.compute_time = compute_time
@@ -238,7 +259,8 @@ class CapacityGenerationController:
             return len(self.capacity_level2id)
 
     @check_model
-    def train_model(self,
+    def train_model(
+        self,
         profiles: list[Profile],
         begin_time: datetime,
         device: torch.device,
@@ -251,6 +273,7 @@ class CapacityGenerationController:
             profiles: 人员画像列表
             begin_time: 训练数据参考开始时间，比如训练数据是采集到2023年11月12号，那么begin_time应该是2023年11月12号
             device: 训练设备，'cpu' or 'cuda'
+            num_workers: 训练数据加载器的工作进程数
         """
         
         # create dataset
@@ -278,7 +301,11 @@ class CapacityGenerationController:
         )
 
         # optimizer & scheduler
-        optimizer = SGD(list(self.model.parameters()), lr=self.model.config.lr, weight_decay=self.model.config.weight_decay)
+        optimizer = SGD(
+            list(self.model.parameters()),
+            lr=self.model.config.lr,
+            weight_decay=self.model.config.weight_decay
+        )
         total_training_step = self.model.config.num_epochs * len(train_dataset) 
         warm_up_steps = self.model.config.num_epochs * len(train_dataset) * self.model.config.warming_up_proportion
         scheduler = get_linear_schedule_with_warmup(optimizer, warm_up_steps, total_training_step)
@@ -312,8 +339,8 @@ class CapacityGenerationController:
                 )
                 optimizer.zero_grad()
                 # capacity_levels = capacity_levels.masked_fill_(~capa_mask, padding_setting.capa_level_pad_id)
-                l = loss.forward(pred.permute(0, 2, 1), capacity_levels)
-                l.backward()
+                loss_value = loss.forward(pred.permute(0, 2, 1), capacity_levels)
+                loss_value.backward()
                 optimizer.step()
                 scheduler.step()
                 (
@@ -328,7 +355,7 @@ class CapacityGenerationController:
                     capa_mask 
                 ) = pre_fetcher.next()
                 # callback
-                self.logger.log_train(epoch, step, l.item())
+                self.logger.log_train(epoch, step, loss_value.item())
                 step += 1
         
         # set back compute time
@@ -357,7 +384,8 @@ class CapacityGenerationController:
 
     @torch.no_grad()
     @check_model
-    def predicate(self,
+    def predicate(
+        self,
         profiles: list[Profile],
         rel_time: Optional[datetime] = None,
         validation: bool = False,
@@ -367,6 +395,9 @@ class CapacityGenerationController:
         batched predicate
         Args:
             profiles: 要预测的人员画像列表，每个画像中的能力等级信息将被忽略，预测对应能力类型信息的等级
+            rel_time: 动态特征计算时间，如果为None则使用当前时间
+            validation: 是否为验证，如果为True则返回分类报告
+            report_text: 是否返回分类报告的文本，如果为False则返回字典
         
         Returns:
             if validation is True return classification report ( str for report_text is True else dict )
@@ -400,7 +431,11 @@ class CapacityGenerationController:
             pad_setting
         )
 
-        loader = DataLoader(pred_dataset, batch_size= self.model.config.batch_size if validation else len(pred_dataset), shuffle=False)
+        loader = DataLoader(
+            pred_dataset,
+            batch_size=self.model.config.batch_size if validation else len(pred_dataset),
+            shuffle=False
+        )
         device = self.model.device
         pred_levels = []
         label_levels = []
@@ -463,11 +498,13 @@ class CapacityGenerationController:
             implementation schema 2
             set previous level idx to be capacity_idx * num_capacity_levels + previous_level_idx
             """
-            label_levels = numpy.concatenate(label_levels, axis=0) # shape (num_profiles, num_capacities)
-            add_levels = numpy.arange(len(self.settings.capacity_names)) * len(self.settings.capacity_levels) # shape (num_capacities)
+            label_levels = numpy.concatenate(label_levels, axis=0)  # shape (num_profiles, num_capacities)
+            add_levels = numpy.arange(len(self.settings.capacity_names)) * len(self.settings.capacity_levels)
+            # add_levels shape (num_capacities, )
             label_levels += add_levels
             pred_levels += add_levels
-            label_names = [f'{name}_{level}' for name in self.settings.capacity_names for level in self.settings.capacity_levels]
+            label_names = [
+                f'{name}_{level}' for name in self.settings.capacity_names for level in self.settings.capacity_levels]
             return classification_report(
                 label_levels.reshape(-1), 
                 pred_levels.reshape(-1), 

@@ -1,24 +1,22 @@
-from pathlib import Path
-import openai
-from openai.openai_object import OpenAIObject
-from typing import Callable
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizerFast
-import torch
 import gc
 # import typing
-from typing import Callable, Optional, List, Union, Dict, Any, Tuple, Generator
-from transformers.generation.logits_process import LogitsProcessorList
-from transformers.generation.configuration_utils import GenerationConfig
-from transformers import PreTrainedTokenizer
+from typing import Callable, Optional, List, Union, Any, Tuple, Generator
 
+import openai
+import torch
+from openai.openai_object import OpenAIObject
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizer
+from transformers.generation.configuration_utils import GenerationConfig
+from transformers.generation.logits_process import LogitsProcessorList
 
 from smpkg.prompt import InformationExtractionArrayPrompt, extract_json
 
 __all__ = [
 	'connect_llm',
 	'LocalLLMController',
-	'gpt_maintainance_record_extraction'
-	'default_prompt'
+	'gpt_maintainance_record_extraction',
+	'HistoryType'
 ]
 
 
@@ -27,7 +25,7 @@ def connect_openai(api_key: str, api_base: str):
 	openai.api_base = api_base
 
 
-def connect_llm(llm_name: str, **kwargs):
+def connect_llm(llm_name: str = 'openai', **kwargs):
 	r"""
 	连接到llm，执行完此方法后应当能够执行任意的函数
 	llm_name输入后，需要指定连接信息，用kwargs来指定，缺少会抛出KeyError
@@ -62,7 +60,12 @@ def chat(content: str, num_choices: int = 1, role: str = "user") -> list[str]:
 	return [ c['message']['content'] for c in res['choices'] ]
 
 
-def chat_stream(content: str, stream_handler: Callable[[OpenAIObject], None], num_choices: int = 1, role='user') -> None:
+def chat_stream(
+	content: str,
+	stream_handler: Callable[[OpenAIObject], None],
+	num_choices: int = 1,
+	role='user'
+) -> None:
 	res = openai.ChatCompletion.create(
 		model='gpt-3.5-turbo',
 		messages=[{
@@ -110,6 +113,7 @@ def gpt_maintainance_record_extraction(prompt: InformationExtractionArrayPrompt,
 	if not res:
 		raise ValueError('extraction failed, return text is {}'.format(res_text[0]))
 	return res
+
 
 # self declared
 HistoryType = List[Tuple[str, str]]
@@ -159,6 +163,8 @@ class LocalLLMController:
 		if not device.type == 'cuda':
 			raise ValueError('Quantitized model can only run on cuda device.')
 		self.device = device
+		self.model = None
+		self.tokenizer = None
 
 	def load(self):
 		self.tokenizer = AutoTokenizer.from_pretrained(self.qwen_dir, trust_remote_code=True)
@@ -169,7 +175,11 @@ class LocalLLMController:
 		).eval()
 
 	@torch.no_grad()
-	def info_extraction_task_stream(self, prompt: InformationExtractionArrayPrompt, sentence: str) -> Generator[str, Any, None]:
+	def info_extraction_task_stream(
+		self,
+		prompt: InformationExtractionArrayPrompt,
+		sentence: str
+	) -> Generator[str, Any, None]:
 		r"""
 		Args:
 			`prompt`: InformationExtractionArrayPrompt
@@ -195,7 +205,7 @@ class LocalLLMController:
 			raise ValueError('model not loaded')
 		json_str, _ = self.model.chat(self.tokenizer, prompt(sentence), None)
 		return self.extract_json_array_from_str(json_str)
-    
+
 	@staticmethod
 	def extract_json_array_from_str(content: str) -> Union[dict, list, None]:
 		r = extract_json(content)
@@ -208,4 +218,3 @@ class LocalLLMController:
 		torch.cuda.empty_cache()
 		gc.collect()
 		del self.tokenizer
-

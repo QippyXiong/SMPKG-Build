@@ -58,7 +58,10 @@ class PromptNatualLanguageConstraint:
 		return self.description
 
 
-ConstraintTypes = Union[PromptTypeConstraint, PromptDateFormatConstraint, PromptSelectedValueConstraint, PromptNatualLanguageConstraint]
+ConstraintTypes = Union[
+	PromptTypeConstraint, PromptDateFormatConstraint, PromptSelectedValueConstraint, PromptNatualLanguageConstraint
+]
+
 
 @dataclass
 class InformationExtractionArrayPrompt:
@@ -79,7 +82,6 @@ class InformationExtractionArrayPrompt:
 	example_outputs: list[dict[str, str]]
 	# 无法对于无法检测到的键对应值的填写
 	unknown_value: str = 'null'
-
 
 	# if the output should return extra information
 	_should_return_extra: bool = field(init=False, default=True)
@@ -107,7 +109,10 @@ class InformationExtractionArrayPrompt:
 		prompt_content += '[\n'
 		for example_output in self.example_outputs:
 			prompt_content += '\t{\n'
-			prompt_content += ''.join(['\t\t"{}": {},\n'.format(key, f'"{value}"' if value else self.unknown_value ) for key, value in example_output.items()])
+			prompt_content += ''.join([
+				'\t\t"{}": {},\n'.format(key, f'"{value}"' if value else self.unknown_value )
+				for key, value in example_output.items()
+			])
 			prompt_content += '\t},\n'
 		prompt_content += ']\n'
 		if not self._should_return_extra:
@@ -130,12 +135,13 @@ class InformationExtractionArrayPrompt:
 		return self.create_prompt_content() + input_text
 
 
-def extract_json(str: str, encoding='UTF-8') -> Union[dict, list, None]:
+def extract_json(string: str, encoding='UTF-8') -> Union[dict, list, None]:
 	r"""
 	find the json string in str and parse it
 
 	Args:
-		str: input string contains json string
+		string: input string contains json string
+		encoding: encoding of string
 	
 	Returns
 		parsed json object, if has no json string return None
@@ -146,24 +152,24 @@ def extract_json(str: str, encoding='UTF-8') -> Union[dict, list, None]:
 	stack = []
 	result = {}
 	for i in range(len(str)):
-		if str[i] == '{' or str[i] == '[':
-			stack.append((str[i], i))
+		if string[i] == '{' or string[i] == '[':
+			stack.append((string[i], i))
 		
-		if str[i] == '}':
-			if not stack: # empty list, only happen if '}' appears before json string
+		if string[i] == '}':
+			if not stack:  # empty list, only happen if '}' appears before json string
 				continue
 
 			char, idx = stack.pop()
 			
-			if char == '{': # matched, parse
+			if char == '{':  # matched, parse
 				try:
 					result = json5.loads(str[idx: i+1], encoding=encoding)
-				except:
-					stack = [] # parse fail, this not json, that mean all before i cannot be json
+				except Exception:
+					stack = []  # parse fail, this not json, that mean all before i cannot be json
 			else:  # that mean it's '[', all these context are errored
 				stack = []
 		
-		if str[i] == ']': # same as the previous one
+		if string[i] == ']':  # same as the previous one
 			if not stack:
 				continue
 
@@ -171,8 +177,8 @@ def extract_json(str: str, encoding='UTF-8') -> Union[dict, list, None]:
 
 			if char == '[':
 				try:
-					result = json5.loads(str[idx: i+1], encoding=encoding)
-				except:
+					result = json5.loads(string[idx: i+1], encoding=encoding)
+				except Exception:
 					stack = []
 			else:
 				stack = []

@@ -11,6 +11,7 @@ class Logger:
 	def log_train(self, epoch: int, step: int, loss: float):
 		if epoch == 20000:
 			self.num += 1
-			print(f"Config{self.num} final loss: {loss}")
-	
+			print(f"Config{self.num} final loss: {loss} by steps {step}")
+
+
 logger = Logger()

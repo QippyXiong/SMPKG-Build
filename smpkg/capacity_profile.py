@@ -1,33 +1,43 @@
-from torch.utils.data import Dataset, DataLoader
-from torch import Tensor
-import torch
 from dataclasses import dataclass
-from neomodel import db
 from datetime import datetime
-from typing import Callable, Any, Optional, Literal
+from typing import Callable, Optional, Literal
+
+import torch
+from torch import Tensor
+from torch.utils.data import Dataset, DataLoader
+
+
+__all__ = [
+    'ProfileFeature',
+    'ProfileCapacity',
+    'Profile',
+    'DatasetPadding',
+    'FeatureCapacityDataset',
+    'DataPrefetcher',
+]
 
 
 @dataclass
 class ProfileFeature:
     r""" 单个特征信息 """
-    feature_cls: str # 特征类型
-    feature_value: Optional[str] = None # 特征值
-    feature_time: Optional[datetime] = None # 特征时间
+    feature_cls: str  # 特征类型
+    feature_value: Optional[str] = None  # 特征值
+    feature_time: Optional[datetime] = None  # 特征时间
 
 
 @dataclass
 class ProfileCapacity:
     r""" 单个能力信息 """
-    capacity_name: str # 能力类型名称
-    capacity_level: Optional[str] = None # 能力等级
+    capacity_name: str  # 能力类型名称
+    capacity_level: Optional[str] = None  # 能力等级
 
 
 @dataclass
 class Profile:
     r""" 人员能力画像 """
-    static_features: list[ProfileFeature] # 静态特征
-    dynamic_features: list[ProfileFeature] # 动态特征
-    capacities: list[ProfileCapacity] # 能力
+    static_features: list[ProfileFeature]  # 静态特征
+    dynamic_features: list[ProfileFeature]  # 动态特征
+    capacities: list[ProfileCapacity]  # 能力
 
 
 @dataclass
@@ -41,7 +51,7 @@ class DatasetPadding:
     static_feature_cls_pad_id: int    = 0
     dynamic_feature_cls_pad_id: int   = 0
     dynamic_feature_value_pad_id: int = 0
-    dynamic_feature_pad_interval: float = 1e6 # use a large interval let weight be 0
+    dynamic_feature_pad_interval: float = 1e6  # use a large interval let weight be 0
 
     capa_pad_strategy: Literal['all_capa', 'fix_len'] = 'all_capa'
 
@@ -50,7 +60,8 @@ class FeatureCapacityDataset(Dataset):
     r"""
     basic class for 
     """
-    def __init__(self, 
+    def __init__(
+        self,
         profiles: list[Profile], 
         static_feature_embedder: Callable[[ProfileFeature], int],
         dynamic_feature_embedder: Callable[[ProfileFeature], tuple[int, int, float]],
@@ -83,7 +94,8 @@ class FeatureCapacityDataset(Dataset):
         """
         perdata: Profile = self.data[idx]
 
-        static_feature_cls = [ self.static_feature_embedder(feature.feature_cls) for feature in perdata.static_features ]
+        static_feature_cls = [ self.static_feature_embedder(feature.feature_cls)
+                               for feature in perdata.static_features ]
         static_feature_attn_mask = [1] * len(static_feature_cls)
 
         dynamic_features = [ self.dynamic_feature_embedder(feature) for feature in perdata.dynamic_features ]
@@ -150,10 +162,12 @@ class FeatureCapacityDataset(Dataset):
             torch.tensor(dynamic_feature_attn_mask, dtype=torch.bool),
             torch.tensor(capa_mask, dtype=torch.bool)
         )
-        
+
+
 class DataPrefetcher:
 
-    def __init__(self, 
+    def __init__(
+        self,
         dataset: FeatureCapacityDataset,
         batch_size: int,
         num_workers: int = 1,
@@ -245,4 +259,3 @@ class DataPrefetcher:
             dynamic_feature_attn_mask,
             capa_mask 
         )
-
