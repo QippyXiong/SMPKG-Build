@@ -52,8 +52,14 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 
 然后执行：
 
+
 ```shell
 conda install --file requirements.txt -c pytorch -c nvidia -c conda-forge
 ```
 
-接下来就可以运行了。
+后续就可以运行了。
+
+
+## 2024来了！
+
+新年快乐，桃花运拉满！！！
