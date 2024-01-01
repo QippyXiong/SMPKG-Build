@@ -12,7 +12,7 @@
 
 **On Windows**：(点击链接访问w)
 
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools)
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools)，勾选使用C++的桌面开发（6.6GB左右）
 - [Git](https://git-scm.com/downloads)
 - [Make](https://gnuwin32.sourceforge.net/downlinks/make.php)
 
@@ -51,7 +51,6 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 下载本项目依赖之前，打开requirements.txt，修改pytorch-cuda对应的cuda版本为本机对应的cuda版本，cpu运行可以不下。
 
 然后执行：
-
 
 ```shell
 conda install --file requirements.txt -c pytorch -c nvidia -c conda-forge
