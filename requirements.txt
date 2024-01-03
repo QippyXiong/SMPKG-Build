@@ -12,5 +12,5 @@ transformers
 pandas
 numpy
 scikit-learn
-Cython
+cython
 mypy

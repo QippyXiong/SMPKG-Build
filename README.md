@@ -8,11 +8,11 @@
 
 **On Linux：**
 
-    None （GCC，Python，已经装好了）
+None （GCC，Python，已经装好了）
 
 **On Windows**：(点击链接访问w)
 
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools)，勾选使用C++的桌面开发（6.6GB左右）
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools)
 - [Git](https://git-scm.com/downloads)
 - [Make](https://gnuwin32.sourceforge.net/downlinks/make.php)
 
@@ -24,9 +24,7 @@ Windows 执行make命令之前，需要执行 `sh`指令进入bash界面，这�
 X:xxx\xxx> sh
 ```
 
-后续两个操作系统不会有区别。
-
-### Build 修改文件
+### Build文件修改
 
 直接进到Makefile看好了，标注 `!修改!`的行请按照描述修改。
 
@@ -34,13 +32,27 @@ setup.py不用修改。
 
 ### Build 执行
 
-build输出，如果python是当前shell默认python不用添加此参数。
+需要下载 `Cython`，`mypy`两个包：
 
-```shell
-make build PYTHON=xxx
+```bash
+pip install cython mypy
 ```
 
-如果有入口文件的话，调用以下指令，Makefile中的Args用来输入参数
+如果是conda：
+
+```bash
+conda install cython mypy -c conda-forge
+```
+
+build输出，如果python是当前shell默认python不用添加此参数。
+
+在windows下使用git的 `sh`不能激活python环境，如果使用了虚拟环境而不是默认的python，需要指定环境python的路径，一般就在环境所在文件夹的底下。git `sh`里面磁盘路径不是 `C:`而是 `/c/`，比如说我要指定 `D:\program\miniconda3\envs\smpkg\python`，那么 `sh`里的路径是 `/d/program/miniconda3/envs/smpkg/python`，例子：
+
+```bash
+make build PYTHON='/d/program/miniconda3/envs/smpkg/python'
+```
+
+如果有入口文件的话，调用以下指令来运行build后的项目，Makefile中的ARGS用来输入参数：
 
 ```
 make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
@@ -56,9 +68,8 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 conda install --file requirements.txt -c pytorch -c nvidia -c conda-forge
 ```
 
-后续就可以运行了。
+接下来就可以运行了：
 
-
-## 2024来了！
-
-新年快乐，桃花运拉满！！！
+```bash
+python main.py
+```
