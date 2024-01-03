@@ -68,6 +68,8 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 
 报错 2 是指定的python或者文件没找到，看看路径是否错了。
 
+说找不到执行 build 之类的，要么是Makefile不在执行make的目录下，要么是下载的时候电脑自动在Makefile后面加了`.txt`。
+
 ## 本项目内容
 
 下载本项目依赖之前，打开requirements.txt，修改pytorch-cuda对应的cuda版本为本机对应的cuda版本，cpu运行可以不下。
