@@ -12,7 +12,7 @@ None （GCC，Python，已经装好了）
 
 **On Windows**：(点击链接访问w)
 
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools)
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/zh-hant/visual-cpp-build-tools) （打开installer后点击生成工具的修改，勾选使用C++的桌面开发进行下载（6.6GB左右）
 - [Git](https://git-scm.com/downloads)
 - [Make](https://gnuwin32.sourceforge.net/downlinks/make.php)
 

@@ -5,3 +5,7 @@ reports
 models
 .idea
 .git
+.my
+__pycache__
+.*
+!/.gitignore
