@@ -605,8 +605,8 @@ async def local_LLM_info_extraction(data: ExtractData):
                                          ent1_type=MaintenanceWorker, ent2_type=MaintenanceRecord,
                                          rel_type='MaintenancePerformance')
                 
-                res.append({ "type": "MaintenanceRecord", "record": parse_record_to_dict(rec_ent) })
-                res.append({ "type": "MaintenanceWorker", "record": parse_record_to_dict(per_ent)})
+                res.append({ "type": "MaintenanceRecord", "record": {"element_id": rec_ent.element_id, "record": parse_record_to_dict(rec_ent)} })
+                res.append({ "type": "MaintenanceWorker", "record": {"element_id": per_ent.element_id, "record": parse_record_to_dict(per_ent)} })
                 res.append(rel)
         res = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + res)
         if len(fail_msgs) == len(infos):  # all fail
