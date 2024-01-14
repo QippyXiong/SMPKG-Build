@@ -2,7 +2,7 @@
 
 ## 关于 Build
 
-使用文件 `setup.py`和 `Makefile`来build，建议python版本：3.11，3.8和3.12都不可build。
+使用文件 `setup.py`和 `Makefile`来build，把这两个文件放到你的工程目录下，建议python版本：3.11，3.8和3.12都不可build。
 
 ### Build所需应用程序
 
@@ -44,7 +44,9 @@ pip install cython mypy
 conda install cython mypy -c conda-forge
 ```
 
-build输出，如果python是当前shell默认python不用添加此参数。
+使用指令`make build PYTHON=xxx`build输出文件，如果python是当前shell默认python不用添加此参数。
+
+在Windows下输出文件是每个python文件对应一个`.pyd`和`.pyi`，在Linux下是每个python文件对应一个`.so`和`.pyi`，前一个是代码编译的运行库，后一个是运行库接口文件。
 
 在windows下使用git的 `sh`不能激活python环境，如果使用了虚拟环境而不是默认的python，需要指定环境python的路径，一般就在环境所在文件夹的底下。git `sh`里面磁盘路径不是 `C:`而是 `/c/`，比如说我要指定 `D:\program\miniconda3\envs\smpkg\python`，那么 `sh`里的路径是 `/d/program/miniconda3/envs/smpkg/python`，例子：
 
@@ -57,6 +59,16 @@ make build PYTHON='/d/program/miniconda3/envs/smpkg/python'
 ```
 make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 ```
+
+#### FAQ
+
+报错 9009 是 Python 未找到，说明`sh`里没找到名为python的环境变量，指定python路径即可。
+
+报错 1 是 build 的python代码出了问题，如果是用pip下的mypy，cython下的可以尝试改用conda重下。
+
+报错 2 是指定的python或者文件没找到，看看路径是否错了。
+
+说找不到执行 build 之类的，要么是Makefile不在执行make的目录下，要么是下载的时候电脑自动在Makefile后面加了`.txt`。
 
 ## 本项目内容
 
