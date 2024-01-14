@@ -44,9 +44,9 @@ pip install cython mypy
 conda install cython mypy -c conda-forge
 ```
 
-使用指令`make build PYTHON=xxx`build输出文件，如果python是当前shell默认python不用添加此参数。
+使用指令 `make build PYTHON=xxx`build输出文件，如果python是当前shell默认python不用添加此参数。
 
-在Windows下输出文件是每个python文件对应一个`.pyd`和`.pyi`，在Linux下是每个python文件对应一个`.so`和`.pyi`，前一个是代码编译的运行库，后一个是运行库接口文件。
+在Windows下输出文件是每个python文件对应一个 `.pyd`和 `.pyi`，在Linux下是每个python文件对应一个 `.so`和 `.pyi`，前一个是代码编译的运行库，后一个是运行库接口文件。
 
 在windows下使用git的 `sh`不能激活python环境，如果使用了虚拟环境而不是默认的python，需要指定环境python的路径，一般就在环境所在文件夹的底下。git `sh`里面磁盘路径不是 `C:`而是 `/c/`，比如说我要指定 `D:\program\miniconda3\envs\smpkg\python`，那么 `sh`里的路径是 `/d/program/miniconda3/envs/smpkg/python`，例子：
 
@@ -62,13 +62,13 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 
 #### FAQ
 
-报错 9009 是 Python 未找到，说明`sh`里没找到名为python的环境变量，指定python路径即可。
+报错 9009 是 Python 未找到，说明 `sh`里没找到名为python的环境变量，指定python路径即可。
 
 报错 1 是 build 的python代码出了问题，如果是用pip下的mypy，cython下的可以尝试改用conda重下。
 
 报错 2 是指定的python或者文件没找到，看看路径是否错了。
 
-说找不到执行 build 之类的，要么是Makefile不在执行make的目录下，要么是下载的时候电脑自动在Makefile后面加了`.txt`。
+说找不到执行 build 之类的，要么是Makefile不在执行make的目录下，要么是下载的时候电脑自动在Makefile后面加了 `.txt`。
 
 ## 本项目内容
 
@@ -91,4 +91,14 @@ pip install -r requirements.txt
 
 ```bash
 python main.py
+```
+
+如果需要使用信息抽取模型，需要加载Qwen大语言模型，可以用git clone模型7b参数的模型或者是14b参数的模型，前一个需要8\~14GB显存，后一个需要13\~22GB显存，models文件夹下为默认加载路劲。
+
+```shell
+git lfs clone https://www.modelscope.cn/qwen/Qwen-7B-Chat-Int4.git
+```
+
+```shell
+git lfs clone https://www.modelscope.cn/qwen/Qwen-14B-Chat-Int4.git
 ```

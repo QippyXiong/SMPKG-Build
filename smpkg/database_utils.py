@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-def connect_to_neo4j(address: str, username: str, password: str):
+def connect_to_neo4j(address: str, username: str, password: str) -> None:
 	r"""
 	address is like: 'localhost:7687'
 	"""
@@ -41,7 +41,7 @@ def connect_to_neo4j(address: str, username: str, password: str):
 	db.set_connection(f'bolt://{ username }:{ password }@{ address }')
 
 
-def handle_time_key(ent_cls: type[StructuredNode], attr: Dict):
+def handle_time_key(ent_cls: type[StructuredNode], attr: dict) -> None:
 	r"""
 	时间类型字段处理
 	"""
@@ -66,7 +66,7 @@ def GetEntAttribute(ent_cls: type[StructuredNode]) -> list[ tuple[str, str] ]:
 	Args:
 		'ent_cls': 继承StructuredNode的结点类
 	Returns:
-		[[属性名，属性类型名]]
+		[(属性名，属性类型名)]
 	"""
 	ent_class = ent_cls
 	atts = ent_class.__all_properties__
@@ -247,6 +247,7 @@ def load_excel_file_to_graph(file_path: str):
 		)  # 删掉原先图谱中的全部内容
 	except ServiceUnavailable as e:
 		raise ServiceUnavailable("[Neomodel Error] 未能连接到neo4j服务器，请检查neo4j服务器是否开启")
+	
 	from kgdatabase.maintenance_personnel import MaintenanceWorker, MaintenanceRecord, Capacity
 
 	mapping_worker = {
@@ -663,3 +664,62 @@ def collect_attrib_values_from_db(
 		]
 		values = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + all_values)
 	return values
+
+
+def get_persons_profiles(
+	p_cls: type[StructuredNode],
+	p_attrs: dict,
+	feature_rel_list: list[tuple[str, bool]],
+	feature_time_node_attrib_names: Union[str, list[str]] = 'end_date',
+	feature_cls_node_attrib_names: Union[str, list[str]] = 'name',
+	feature_value_rel_attrib_names: Union[str, list[str]] = 'performance',
+) -> list[Profile]:
+	r"""
+	find persons with p_attrs, return their profiles
+	"""
+	if isinstance(feature_cls_node_attrib_names, str):
+		feature_cls_node_attrib_names = [feature_cls_node_attrib_names] * len(feature_rel_list)
+	if isinstance(feature_value_rel_attrib_names, str):
+		feature_value_rel_attrib_names = [feature_value_rel_attrib_names] * len(feature_rel_list)
+	if isinstance(feature_time_node_attrib_names, str):
+		feature_time_node_attrib_names = [feature_time_node_attrib_names] * len(feature_rel_list)
+	
+	persons = p_cls.nodes.filter(**p_attrs)
+	profiles: list[Profile] = []
+
+	for person in persons:
+		for (
+			(feature_rel_name, is_static),
+			node_cls_attrib_name,
+			value_rel_attrib_name,
+			time_attrib_name
+		) in zip(
+			feature_rel_list,
+			feature_cls_node_attrib_names,
+			feature_value_rel_attrib_names,
+			feature_time_node_attrib_names
+		):
+
+			rel: RelationshipManager = getattr(person, feature_rel_name)
+			static_features = []
+			dynamic_features = []
+
+			for feature_node in rel.all():
+				if is_static:
+					static_features.append(ProfileFeature(
+						getattr(feature_node, node_cls_attrib_name),
+					))
+				else:
+					dynamic_features.append(ProfileFeature(
+						getattr(feature_node, node_cls_attrib_name),
+						getattr(rel.relationship(feature_node), value_rel_attrib_name),
+						getattr(feature_node, time_attrib_name)
+					))
+
+			profiles.append(Profile(
+				static_features,
+				dynamic_features,
+				[]
+			))
+
+	return profiles

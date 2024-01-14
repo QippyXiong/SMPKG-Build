@@ -6,22 +6,32 @@ from neomodel import db, StructuredNode, RelationshipManager, StructuredRel
 from dataclasses import dataclass
 import sys
 
+import torch
+
 from kgdatabase.maintenance_personnel import MaintenanceWorker, Capacity, MaintenanceRecord, MaintenancePerformance, \
     CapacityRate
 from smpkg.llm import LocalLLMController
+from smpkg.capacity_controller import CapacityGenerationController
 from smpkg.database_utils import (EntityQueryByAtt, RelQueryByEnt, getRelEnt, CreateEnt,
                                   handle_time_key, CreateRel, UpdateEnt, UpdateRel, DeleteEnt, DeleteRel,
-                                  RelQueryByEntsAttr)
+                                  RelQueryByEntsAttr, get_persons_profiles)
 from smpkg.prompt import InformationExtractionArrayPrompt, PromptDateFormatConstraint
 
 
 app = FastAPI()
 local_llm_controller: Optional[LocalLLMController] = None
+local_capa_controller: Optional[CapacityGenerationController] = None
 
 
-def init_local_llm_controller(model_dir: str, device: str):
+def init_local_llm_controller(model_dir: str, device: torch.device) -> LocalLLMController:
     global local_llm_controller
     local_llm_controller = LocalLLMController(model_dir, device)
+    return local_llm_controller
+
+
+def init_local_capa_controller(controller: CapacityGenerationController):
+    global local_capa_controller
+    local_capa_controller = controller
 
 
 database_module_name = 'database'
@@ -388,27 +398,52 @@ async def sendShowData(websocket: WebSocket):
         await websocket.send_json({})
 
 
-malfunc_capacity_mapping = {
-    "轨道损坏": "轨道维修",
-    "轮胎车轴故障": "轮胎车轴维修",
-    "车门故障": "车门维修",
-    "照明损坏": "照明维修",
-    "空调故障": "空调维修",
-    "制动系统故障": "制动系统维修",
-    "排水沟损坏": "排水系统维修",
-    "排水系统堵塞": "排水系统维修",
-    "通风系统堵塞": "通风系统维修",
-    "烟雾报警器故障": "烟雾报警器维修",
-    "紧急停车系统故障": "紧急停车系统维修",
-    "自动售票机故障": "自动售票机维修",
-    "安检设备故障": "安检设备维修",
-    "闸机故障": "闸机维修",
-    "电梯故障": "电梯维修",
-    "扶梯故障": "扶梯维修",
-    "电力系统故障": "电力系统维修",
-    "地铁信号故障": "地铁信号维修",
-    "监视系统故障": "监视系统维修"
-}
+malfuncs = [
+    "轨道损坏"        ,
+    "轮胎车轴故障"    ,
+    "车门故障"        ,
+    "照明损坏"        ,
+    "空调故障"        ,
+    "制动系统故障"    ,
+    "排水沟损坏"      ,
+    "排水系统堵塞"    ,
+    "通风系统堵塞"    ,
+    "烟雾报警器故障"  ,
+    "紧急停车系统故障",
+    "自动售票机故障"  , 
+    "安检设备故障"    ,
+    "闸机故障"        , 
+    "电梯故障"        ,
+    "扶梯故障"        ,
+    "电力系统故障"    ,
+    "地铁信号故障"    ,
+    "监视系统故障"    ,
+]
+
+
+def GenerateMulRecordByRecord(record: dict) -> tuple[bool, str]:
+    if "malfunc" not in record.keys() or record["malfunc"] not in malfuncs:
+        return False, "维修故障不存在"
+    if "person" not in record.keys():
+        return False, "维修人员字段缺失"
+    person = MaintenanceWorker.nodes.filter(name=record["person"])
+    if person.__len__() == 0:
+        return False, "维修人员不存在"
+    if person.__len__() > 1:
+        return False, "维修人员不唯一"
+    attr = {"malfunction": record["malfunc"], "place": record["place"],
+            "malfunc_time": record["begin_time"], "begin_time": record["begin_time"],
+            "complish_time": record["end_time"]}
+    malrecord, _ = CreateEnt(MaintenanceRecord, attr)
+    if malrecord is None:
+        attr = handle_time_key(MaintenanceRecord, attr)
+        malrecord = MaintenanceRecord.nodes.get(**attr)
+    rel: RelationshipManager = getattr(person[0], 'MaintenancePerformance')
+    if_exist_edge = rel.relationship(malrecord)
+    if if_exist_edge is None:
+        CreateRel(person[0], malrecord, MaintenancePerformance, attr={"performance": "正常"})
+    return True, "维修记录更新成功"
+
 
 example_outputs = [{
     "姓名": "王卫国",
@@ -458,50 +493,6 @@ prompt = InformationExtractionArrayPrompt(
 )
 
 
-def GenerateCapByRecord(record: dict):
-    if "malfunc" not in record.keys() or record["malfunc"] not in malfunc_capacity_mapping.keys():
-        return False, "维修故障不存在"
-    if "person" not in record.keys():
-        return False, "维修人员字段缺失"
-
-    person = MaintenanceWorker.nodes.filter(name=record["person"])
-    if person.__len__() == 0:
-        return False, "维修人员不存在"
-    if person.__len__() > 1:
-        return False, "维修人员不唯一"
-    cap, _ = CreateEnt(Capacity, attr={"name": malfunc_capacity_mapping[record["malfunc"]]})
-    if cap is None:
-        cap = Capacity.nodes.get(name=malfunc_capacity_mapping[record["malfunc"]])
-    rel: RelationshipManager = getattr(person, "CapacityRate")
-    if rel.__len__() == 0:
-        CreateRel(person[0], cap, CapacityRate, attr={"level": "初级"})
-    return True, "人员能力更新成功"
-
-
-def GenerateMulRecordByRecord(record: dict) -> tuple[bool, str]:
-    if "malfunc" not in record.keys() or record["malfunc"] not in malfunc_capacity_mapping.keys():
-        return False, "维修故障不存在"
-    if "person" not in record.keys():
-        return False, "维修人员字段缺失"
-    person = MaintenanceWorker.nodes.filter(name=record["person"])
-    if person.__len__() == 0:
-        return False, "维修人员不存在"
-    if person.__len__() > 1:
-        return False, "维修人员不唯一"
-    attr = {"malfunction": record["malfunc"], "place": record["place"],
-            "malfunc_time": record["begin_time"], "begin_time": record["begin_time"],
-            "complish_time": record["end_time"]}
-    malrecord, _ = CreateEnt(MaintenanceRecord, attr)
-    if malrecord is None:
-        attr = handle_time_key(MaintenanceRecord, attr)
-        malrecord = MaintenanceRecord.nodes.get(**attr)
-    rel: RelationshipManager = getattr(person[0], 'MaintenancePerformance')
-    if_exist_edge = rel.relationship(malrecord)
-    if if_exist_edge is None:
-        CreateRel(person[0], malrecord, MaintenancePerformance, attr={"performance": "正常"})
-    return True, "维修记录更新成功"
-
-
 @app.websocket('/llm/local/')
 async def local_LLM_info_extraction(websocket: WebSocket):
     r"""
@@ -511,8 +502,13 @@ async def local_LLM_info_extraction(websocket: WebSocket):
         websocket: websocket
     """
     global prompt
+    global local_llm_controller
+    global local_capa_controller
+
     if not local_llm_controller:
-        return {'ok': False, 'msg': 'local llm not init yet!', 'data': None}
+        return {'ok': False, 'msg': 'local llm controller not init yet!', 'data': None}
+    if not local_capa_controller:
+        return {'ok': False, 'msg': 'local capa controller not init yet!', 'data': None}
 
     record: dict = websocket.receive_json()
     content = record['text']
@@ -524,7 +520,6 @@ async def local_LLM_info_extraction(websocket: WebSocket):
         await websocket.send_json({'ok': True, 'msg': 'success', 'data': sentence})
 
     infos = local_llm_controller.extract_json_array_from_str(sentence)
-    print(infos)
 
     try:
         res = list()
@@ -535,12 +530,27 @@ async def local_LLM_info_extraction(websocket: WebSocket):
             if not ok:
                 return {'ok': False, 'msg': msg, 'data': infos}
             else:
-                attr1 = {"name": info["person"]}
-                attr2 = {"malfunction": info["malfunc"],
-                         "place": info["place"],
-                         "malfunc_time": info["begin_time"]}
+                attr1 = {"name": info["姓名"]}
+                attr2 = {"malfunction": info["故障类型"],
+                         "place": info["地点"],
+                         "malfunc_time": info["开始时间"]}
                 rec_ent = EntityQueryByAtt(ent_type=MaintenanceRecord, attr=attr2)[0]
                 per_ent = EntityQueryByAtt(ent_type=MaintenanceWorker, attr=attr1)[0]
+                profiles = get_persons_profiles(
+                    MaintenanceWorker,
+                    attr1,
+                    [ ('MaintenancePerformance', False) ],
+                    [ 'complish_time'],
+                    ['malfunction'],
+                    ['performance'],
+                )
+                person_capas = local_capa_controller.predicate(profiles, local_capa_controller.get_rel_time(), True)
+                person_capa = person_capas[0]
+                for capa in person_capa:
+                    capa_ent = Capacity.nodes.get(name=capa.capacity_name)
+                    # capa should exist
+                    CreateRel(per_ent, capa_ent, CapacityRate, attr={"level": capa.capacity_level})
+
                 rel = RelQueryByEntsAttr(attr1=attr1, attr2=attr2,
                                          ent1_type=MaintenanceWorker, ent2_type=MaintenanceRecord,
                                          rel_type='MaintenancePerformance')
@@ -548,6 +558,6 @@ async def local_LLM_info_extraction(websocket: WebSocket):
                 res.append(per_ent)
                 res.append(rel)
             res = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + res)
-        return {'ok': True, 'msg': 'final', 'data': res}
+        return {'ok': True, 'msg': 'update person record and capacities', 'data': res}
     except ValueError as e:
         return {'ok': False, 'msg': str(e), 'data': infos}
