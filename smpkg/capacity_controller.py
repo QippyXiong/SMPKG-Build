@@ -11,14 +11,14 @@ import numpy
 import torch
 from sklearn.metrics import classification_report
 from torch import nn
-from torch.optim import SGD
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers.optimization import get_linear_schedule_with_warmup
 
-from smpkg.attention_evaluator_model import VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator
+from smpkg.attention_evaluator_model import VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator, \
+    ContrastiveCrossEntrophyRegularLoss
 from smpkg.capacity_profile import Profile, ProfileFeature, FeatureCapacityDataset, ProfileCapacity, DatasetPadding, \
     DataPrefetcher
-from smpkg.logger import Logger
 
 
 __all__ = [
@@ -45,19 +45,12 @@ class CapacityGenerationSettings:
 
         # initialize null values
 
-# class DateTimeEncoder(json5.JSONEncoder):
-#     def default(self, obj):
-#         if isinstance(obj, datetime):
-#             return obj.strftime('%Y-%m-%d %H:%M:%S')
-#         elif isinstance(obj, date):
-#             return obj.strftime('%Y-%m-%d')
-#         return json5.JSONEncoder.default(self, obj)
-
 
 method_T = TypeVar('method_T', bound=Callable)
 
 
 def check_model(func: method_T) -> method_T:
+    r""" decorator for check model is initialized """
     @wraps(func)
     def wrapper(self, *args, **kargs):
         if self.model is None:
@@ -65,6 +58,11 @@ def check_model(func: method_T) -> method_T:
         else:
             return func(self, *args, **kargs)
     return wrapper
+
+
+class ILogger:
+    def log_train(self, epoch: int, step: int, loss_value: float):
+        raise NotImplementedError('log_train is not implemented')
 
 
 class CapacityGenerationController:
@@ -78,7 +76,7 @@ class CapacityGenerationController:
         self,
         settings: CapacityGenerationSettings,
         model_config: VanillaCapacityEvaluatorConfig,
-        logger: Optional[Logger] = None
+        logger: Optional[ILogger] = None
     ):
         ...
 
@@ -87,7 +85,7 @@ class CapacityGenerationController:
         self,
         settings: CapacityGenerationSettings,
         model: Optional[VanillaCapacityEvaluator] = None,
-        logger: Optional[Logger] = None
+        logger: Optional[ILogger] = None
     ):
         ...
 
@@ -95,7 +93,7 @@ class CapacityGenerationController:
         self,
         settings: CapacityGenerationSettings,
         model_or_config: Union[VanillaCapacityEvaluatorConfig, VanillaCapacityEvaluator] = None,
-        logger: Optional[Logger] = None
+        logger: Optional[ILogger] = None
     ) -> None:
         self.settings = settings
         self.logger = logger
@@ -144,35 +142,39 @@ class CapacityGenerationController:
     @property
     def default_config(self):
         r"""
+        默认模型配置
         """
         config = VanillaCapacityEvaluatorConfig(
-            query_size=32,
-            query_hidden_size=32,
-            num_query_mapper_layers=2,
-            feature_size=32,
-            feature_hidden_size=32,
-            num_feature_mapper_layers=2,
+
+            query_feature_size=32,
             embed_size=32,
-            num_heads=4,
-            cls_hidden_size=32,
+            num_query_mapper_layers=2,
+            num_feature_mapper_layers=2,
+            num_value_mapper_layers=2,
             num_cls_layers=2,
             num_labels=len(self.settings.capacity_levels),
             num_transformer_blks=0,
+            num_heads=4,
             
             # training params
             num_epochs=5,
             batch_size=24,
-            lr=0.001,
+            lr=0.02,
             weight_decay=0.1,
             dropout=0.1,
             warming_up_proportion=0.1,
 
+            # embeddings
             num_capacity_cls=len(self.settings.capacity_names),
             num_dynamic_feature_cls=len(self.settings.dynamic_feature_classes),
             num_static_feature_cls=len(self.settings.static_feature_classes),
             num_dynamic_feature_values=len(self.settings.dynamic_feature_values),
-            time_decay_func="norm",
-            includeing_days=200.0,
+
+            # time decay setting
+            time_decay_func="fit_norm",
+            includeing_days=3650.,
+
+            # loss params
             static_feature_num=50,
             dynamic_feature_num=50,
             capacity_num=20,
@@ -301,7 +303,7 @@ class CapacityGenerationController:
         )
 
         # optimizer & scheduler
-        optimizer = SGD(
+        optimizer = AdamW(
             list(self.model.parameters()),
             lr=self.model.config.lr,
             weight_decay=self.model.config.weight_decay
@@ -309,7 +311,7 @@ class CapacityGenerationController:
         total_training_step = self.model.config.num_epochs * len(train_dataset) 
         warm_up_steps = self.model.config.num_epochs * len(train_dataset) * self.model.config.warming_up_proportion
         scheduler = get_linear_schedule_with_warmup(optimizer, warm_up_steps, total_training_step)
-        loss = nn.CrossEntropyLoss()
+        loss = ContrastiveCrossEntrophyRegularLoss(self.model.config.alpha, self.model.config.beta)
         model = self.model
         model.to(device)
         model.train()
@@ -388,17 +390,19 @@ class CapacityGenerationController:
         self,
         profiles: list[Profile],
         rel_time: Optional[datetime] = None,
+        filter_no_capa: bool = True,
         validation: bool = False,
-        report_text: bool = False
+        report_text: bool = False,
+        batch_size: Optional[int] = None
     ) -> Union[list[list[ProfileCapacity]], Union[dict, str]]:
         r"""
         batched predicate
         Args:
             profiles: 要预测的人员画像列表，每个画像中的能力等级信息将被忽略，预测对应能力类型信息的等级
             rel_time: 动态特征计算时间，如果为None则使用当前时间
+            filter_no_capa: 是否过滤掉预测为无能力的预测结果
             validation: 是否为验证，如果为True则返回分类报告
             report_text: 是否返回分类报告的文本，如果为False则返回字典
-        
         Returns:
             if validation is True return classification report ( str for report_text is True else dict )
             else return predicate capacity profiles
@@ -431,9 +435,15 @@ class CapacityGenerationController:
             pad_setting
         )
 
+        if batch_size is None:
+            batch_size = ( 
+                len(pred_dataset) if len(pred_dataset) < self.default_config.batch_size
+                else self.default_config.batch_size
+            )
+
         loader = DataLoader(
             pred_dataset,
-            batch_size=self.model.config.batch_size if validation else len(pred_dataset),
+            batch_size=batch_size,
             shuffle=False
         )
         device = self.model.device
@@ -520,7 +530,9 @@ class CapacityGenerationController:
                 ProfileCapacity(
                     capacity_name=capa_name,
                     capacity_level=self.settings.capacity_levels[pred_level[i]]
-                ) for i, capa_name in enumerate(self.settings.capacity_names)
+                ) 
+                for i, capa_name in enumerate(self.settings.capacity_names)
+                if not filter_no_capa or pred_level[i] != 0
             ]
             for pred_level in pred_levels
         ]

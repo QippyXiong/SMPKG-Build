@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable, Optional, Literal
 
 import torch
+import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
@@ -23,22 +24,17 @@ __all__ = [
 class AttentionEvaluatorModelConfig:
     r""" config of AttentionEvaluatorModel """
     # hyper parameters
-    query_size: int
-    query_hidden_size: int
-    num_query_mapper_layers: int
-     
-    feature_size: int
-    feature_hidden_size: int
-    num_feature_mapper_layers: int
+    query_feature_size: int
     embed_size: int
 
-    num_heads: int
-
-    cls_hidden_size: int
+    num_query_mapper_layers: int
+    num_feature_mapper_layers: int
+    num_value_mapper_layers: int
     num_cls_layers: int
     num_labels: int
 
     num_transformer_blks: int
+    num_heads: int
     
     # training params:
     num_epochs: int
@@ -49,6 +45,23 @@ class AttentionEvaluatorModelConfig:
     warming_up_proportion: float
 
 
+class EvaluatorMapperBlock(nn.Module):
+
+    def __init__(self, embed_size: int, dropout: float = 0., activate_block: Optional[nn.Module] = None) -> None:
+        super().__init__()
+        if activate_block is None:
+            activate_block = nn.ReLU()
+        
+        self.block = nn.Sequential(
+            nn.Linear(embed_size, embed_size),
+            activate_block,
+            nn.Dropout(dropout),
+        )
+    
+    def forward(self, x: Tensor) -> Tensor:
+        return self.block(x) + x
+            
+
 class AttentionEvaluatorModel(nn.Module):
     config_cls = AttentionEvaluatorModelConfig
 
@@ -57,31 +70,29 @@ class AttentionEvaluatorModel(nn.Module):
 
         self.config: AttentionEvaluatorModelConfig = config
 
-        # initial query_mapper
+        # initial mappers
         self.query_mapper = nn.Sequential()
-        if config.num_query_mapper_layers:  # zero means don't want a mapper
-            query_sizes = ([config.query_size]
-                           + [config.query_hidden_size] * (config.num_query_mapper_layers-1)
-                           + [config.embed_size])
-            for i in range(len(query_sizes) - 1):
-                self.query_mapper.append(nn.Linear(query_sizes[i], query_sizes[i+1]))
-
-        # initial feature_mapper
+        for _ in range(config.num_query_mapper_layers):
+            block = EvaluatorMapperBlock(config.query_feature_size, config.dropout)
+            for param in block.parameters():
+                if param.dim() > 1:
+                    nn.init.xavier_normal_(param)
+                else:
+                    nn.init.zeros_(param)
+            self.query_mapper.append(block)
+        
         self.feature_mapper = nn.Sequential()
-        if config.num_feature_mapper_layers:  # zero means don't want a mapper
-            feature_sizes = ([config.feature_size]
-                             + [config.feature_hidden_size] * (config.num_feature_mapper_layers-1)
-                             + [config.embed_size])
-            for i in range(len(feature_sizes) - 1):
-                self.feature_mapper.append(nn.Linear(feature_sizes[i], feature_sizes[i+1]))
+        for _ in range(config.num_feature_mapper_layers):
+            self.feature_mapper.append(EvaluatorMapperBlock(config.query_feature_size, config.dropout))
 
+        self.value_mapper = nn.Sequential()
+        for _ in range(config.num_value_mapper_layers):
+            self.value_mapper.append(EvaluatorMapperBlock(config.embed_size, config.dropout))
+        
         self.cls = nn.Sequential()
-        cls_sizes = [config.embed_size] + [config.cls_hidden_size] * (config.num_cls_layers-1) + [config.num_labels]
-        for i in range(len(cls_sizes) - 2):
-            self.cls.append(nn.Linear(cls_sizes[i], cls_sizes[i+1]))
-            self.cls.append(nn.ReLU())
-            self.cls.append(nn.Dropout(config.dropout))
-        self.cls.append(nn.Linear(cls_sizes[-2], cls_sizes[-1]))
+        for _ in range(config.num_cls_layers):
+            self.cls.append(EvaluatorMapperBlock(config.embed_size, config.dropout))
+        self.cls.append(nn.Linear(config.embed_size, config.num_labels))
 
         # initial transformers layer
         if config.num_transformer_blks:
@@ -136,13 +147,15 @@ class AttentionEvaluatorModel(nn.Module):
             transformer_mask = attention_mask.unsqueeze(1).repeat(self.config.num_heads, values.shape[1], 1)
             values = self.transformers(values, ~transformer_mask)
             # shape(batchsize*num_heads, num_features, num_features)
+        input_values = self.value_mapper(values)
+
         attention_mask = attention_mask.unsqueeze(1).repeat(1, query.shape[1], 1)
         # shape (batch_size, num_queries, num_features)
-        values = values.unsqueeze(1).repeat(1, query.shape[1], 1, 1)
+        input_values = input_values.unsqueeze(1).repeat(1, query.shape[1], 1, 1)
         # shape (batch_size, num_queries, num_features, value_size)
 
         weights = (attn_output_weights * feature_time_weights * attention_mask.float()).unsqueeze(-1)
-        cross_pooling_result = values.permute(0, 1, 3, 2) @ weights
+        cross_pooling_result = input_values.permute(0, 1, 3, 2) @ weights
         cross_pooling_result = cross_pooling_result.squeeze(-1)
         # shape (batch_size, num_queries, embed_size)
 
@@ -199,6 +212,8 @@ class VanillaCapacityEvaluatorConfig(AttentionEvaluatorModelConfig):
     static_feature_num: int
     dynamic_feature_num: int
     capacity_num: int
+    alpha: float  # for dot product regular loss
+    beta: float  # for l2 norm regular loss
 
     @property
     def k(self):
@@ -230,12 +245,24 @@ class VanillaCapacityEvaluator(AttentionEvaluatorModel):
     def __init__(self, config: VanillaCapacityEvaluatorConfig):
         super().__init__(config)
         self.config = config
-        self.capacity_embed = nn.Embedding(config.num_capacity_cls, config.query_size)
-        self.static_feature_cls_embed = nn.Embedding(config.num_static_feature_cls, config.feature_size)
-        self.static_feature_values_embed = nn.Embedding(config.num_static_feature_cls, config.feature_size)
-        self.dynamic_feature_cls_embed = nn.Embedding(config.num_dynamic_feature_cls, config.feature_size)
-        self.dynamic_feature_values_emebed = nn.Embedding(config.num_dynamic_feature_values, config.feature_size)
+        self.capacity_embed = nn.Embedding(config.num_capacity_cls, config.query_feature_size)
+        self.static_feature_cls_embed = nn.Embedding(config.num_static_feature_cls, config.query_feature_size)
+        self.static_feature_values_embed = nn.Embedding(config.num_static_feature_cls, config.embed_size)
+        self.dynamic_feature_cls_embed = nn.Embedding(config.num_dynamic_feature_cls, config.query_feature_size)
+        self.dynamic_feature_values_emebed = nn.Embedding(config.num_dynamic_feature_values, config.embed_size)
         # default including days = 3652
+        
+        self.feature_static_code = nn.Parameter(torch.zeros((config.query_feature_size,), dtype=torch.float), requires_grad=True)
+        self.feature_dynamic_code = nn.Parameter(torch.zeros((config.query_feature_size,), dtype=torch.float), requires_grad=True)
+        self.value_static_code = nn.Parameter(torch.zeros((config.embed_size,), dtype=torch.float), requires_grad=True)
+        self.value_dynamic_code = nn.Parameter(torch.zeros((config.embed_size,), dtype=torch.float), requires_grad=True)
+
+        for code in [self.feature_static_code, self.feature_dynamic_code, self.value_static_code, self.value_dynamic_code]:
+            nn.init.normal_(code, 0., 0.01)
+
+        # capacity cls for tanh
+        nn.init.xavier_normal_(self.capacity_embed.weight)
+
         time_param_data = 0.0
         if config.time_decay_func == 'fit_linear':
             time_param_data = 1 / config.includeing_days
@@ -276,7 +303,8 @@ class VanillaCapacityEvaluator(AttentionEvaluatorModel):
         dynamic_feature_values: Tensor,
         dynamic_feature_intervals: Tensor,
         static_attention_masks: Optional[Tensor] = None,
-        dynamic_attention_masks: Optional[Tensor] = None
+        dynamic_attention_masks: Optional[Tensor] = None,
+        return_embeds: bool = False
     ) -> Tensor:
         r"""
         Args:
@@ -312,22 +340,31 @@ class VanillaCapacityEvaluator(AttentionEvaluatorModel):
 
         # combine two features into one
         static_key_input = self.static_feature_cls_embed(static_features)
+        static_key_input = static_key_input + self.feature_static_code
         static_value_input = self.static_feature_values_embed(static_features)
+        static_value_input = static_value_input + self.value_static_code
         dynamic_key_input = self.dynamic_feature_cls_embed(dynamic_features)
+        dynamic_key_input = dynamic_key_input + self.feature_dynamic_code
         dynamic_value_input = self.dynamic_feature_values_emebed(dynamic_feature_values)
+        dynamic_value_input = dynamic_value_input + self.value_dynamic_code
 
         input_keys = torch.cat([static_key_input, dynamic_key_input], dim=1)
         input_values = torch.cat([static_value_input, dynamic_value_input], dim=1)
 
         attention_masks = torch.cat([static_attention_masks, dynamic_attention_masks], dim=1)
 
-        return super().forward(
+        pred_scores = super().forward(
             input_queries,
             input_keys,
             input_values,
             attention_masks, 
             time_weights
         )  # shape (batch_size, num_capacities, num_labels)
+
+        if not return_embeds:
+            return pred_scores
+
+        return pred_scores, input_queries, static_key_input, dynamic_key_input
         
     def train_model(
         self,
@@ -408,3 +445,56 @@ class VanillaCapacityEvaluator(AttentionEvaluatorModel):
                 step += 1
                 if step_call_back:
                     step_call_back(epoch, step, loss_value.item())
+
+
+class ContrastiveCrossEntrophyRegularLoss(nn.CrossEntropyLoss):
+    r"""
+    带嵌入正则的batch内对比学习损失函数。
+    """
+    def __init__(self, alpha: float, beta: float, ignore_index: int = -1) -> None:
+        super().__init__(ignore_index=ignore_index)
+        self.alpha = alpha
+        self.beta = beta
+    
+    def forward(
+        self, 
+        pred: Tensor, 
+        target: Tensor, 
+        reprs: Optional[list[Tensor]] = None, 
+        embedes: Optional[list[Tensor]] = None
+    ) -> Tensor:
+        r"""
+        Args:
+            pred: 模型输出的预测对各个能力的结果。
+            target: 人员画像的各个不同能力的实际能力等级。
+            reprs: 模型特征变换层的输出。
+            embeds: 模型嵌入层的输出。
+        Shapes:
+            pred: shape(batch_size, num_capacities, num_labels)
+            target: shape(batch_size, num_capacities)
+            reprs: list of shape(batch_size, num_cls, embed_size)
+            embeds: list of shape(batch_size, num_cls, embed_size)
+        """
+        loss = super().forward(pred, target)
+
+        if reprs is None:
+            reprs = []
+        if embedes is None:
+            embedes = []
+
+        # compute dot product regular loss
+        for repr in reprs:
+            num_cls = repr.shape[1]
+            embedings_left = repr.unsqueeze(1).repeat(1, num_cls, 1, 1)
+            embedings_right = repr.unsqueeze(2).repeat(1, 1, num_cls, 1)
+            regular_loss1 = torch.linalg.vecdot(embedings_left, embedings_right).sum(-1).sum(-1).mean()
+            loss = loss + self.alpha * regular_loss1
+        # compute l2 norm regular loss
+        for embed in embedes:
+            num_cls = embed.shape[1]
+            embedings_left = embed.unsqueeze(1).repeat(1, num_cls, 1, 1)
+            embedings_right = embed.unsqueeze(2).repeat(1, 1, num_cls, 1)
+            regular_loss2 = - torch.linalg.norm(embedings_left - embedings_right, dim=-1).mean()
+            loss = loss + self.beta * regular_loss2
+
+        return loss

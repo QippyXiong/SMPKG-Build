@@ -1,0 +1,98 @@
+{
+    "base_config": {
+        "query_feature_size": 32,
+        "embed_size": 32,
+        "num_query_mapper_layers": 2,
+        "num_feature_mapper_layers": 2,
+        "num_value_mapper_layers": 2,
+        "num_cls_layers": 2,
+        "num_transformer_blks": 0,
+        "num_heads": 4,
+
+        "num_epochs": 200,
+        "batch_size": 24,
+        "lr": 0.02,
+        "weight_decay": 0.1,
+        "dropout": 0.1,
+        "warming_up_proportion": 0.1,
+        "alpha": 0.0,
+        "beta": 0.0,
+
+        // these values will be replaced by actual values
+        "num_labels": 0,
+        "num_capacity_cls": 0,
+        "num_dynamic_feature_cls": 0,
+        "num_static_feature_cls": 0,
+        "num_dynamic_feature_values": 0,
+
+        "time_decay_func": "fit_norm",
+        "includeing_days": 3650.0,
+        
+        "static_feature_num": 50,
+        "dynamic_feature_num": 50,
+        "capacity_num": 20
+    },
+    // different lr, embed_size, query_feature_size
+    "test_cases": [
+        {
+            "lr": 0.02,
+            "embed_size": 32,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.02,
+            "embed_size": 16,
+            "query_feature_size": 16
+        },
+        {
+            "lr": 0.02,
+            "embed_size": 16,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.02,
+            "embed_size": 32,
+            "query_feature_size": 16
+        },
+        {
+            "lr": 0.01,
+            "embed_size": 32,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.01,
+            "embed_size": 16,
+            "query_feature_size": 16
+        },
+        {
+            "lr": 0.01,
+            "embed_size": 16,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.01,
+            "embed_size": 32,
+            "query_feature_size": 16
+        },
+        {
+            "lr": 0.005,
+            "embed_size": 32,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.005,
+            "embed_size": 16,
+            "query_feature_size": 16
+        },
+        {
+            "lr": 0.005,
+            "embed_size": 16,
+            "query_feature_size": 32
+        },
+        {
+            "lr": 0.005,
+            "embed_size": 32,
+            "query_feature_size": 16
+        }
+    ]
+}

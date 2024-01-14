@@ -6,13 +6,14 @@ from neomodel import db, StructuredNode, RelationshipManager, StructuredRel
 from dataclasses import dataclass
 import sys
 
-from database.maintenance_personnel import MaintenanceWorker, Capacity, MaintenanceRecord, MaintenancePerformance, \
+from kgdatabase.maintenance_personnel import MaintenanceWorker, Capacity, MaintenanceRecord, MaintenancePerformance, \
     CapacityRate
-from smpkg.llm import LocalLLMController, gpt_maintainance_record_extraction
+from smpkg.llm import LocalLLMController
 from smpkg.database_utils import (EntityQueryByAtt, RelQueryByEnt, getRelEnt, CreateEnt,
                                   handle_time_key, CreateRel, UpdateEnt, UpdateRel, DeleteEnt, DeleteRel,
                                   RelQueryByEntsAttr)
 from smpkg.prompt import InformationExtractionArrayPrompt, PromptDateFormatConstraint
+
 
 app = FastAPI()
 local_llm_controller: Optional[LocalLLMController] = None
@@ -550,51 +551,3 @@ async def local_LLM_info_extraction(websocket: WebSocket):
         return {'ok': True, 'msg': 'final', 'data': res}
     except ValueError as e:
         return {'ok': False, 'msg': str(e), 'data': infos}
-
-
-r"""
-end websocket deals
-----
-below call LLM (nonlocal) api
-"""
-
-
-class ExtractData(BaseModel):
-    record: str
-
-
-@app.post("/llm/extract")
-def extract_maintainance_record(data: ExtractData):
-    r"""
-    webserver post api for calling LLM for extracting maintainance record
-
-    Args:
-        data (ExtractData): only include record text for extracting
-    """
-    record = data.record
-    global prompt
-    infos = gpt_maintainance_record_extraction(prompt, record)
-    try:
-        res = list()
-        print(infos)
-        for info in infos:
-            ok, msg = GenerateMulRecordByRecord(info)
-            if not ok:
-                return {'ok': False, 'msg': msg, 'data': infos}
-            else:
-                attr1 = {"name": info["person"]}
-                attr2 = {"malfunction": info["malfunc"],
-                         "place": info["place"],
-                         "malfunc_time": info["begin_time"]}
-                rec_ent = EntityQueryByAtt(ent_type=MaintenanceRecord, attr=attr2)[0]
-                per_ent = EntityQueryByAtt(ent_type=MaintenanceWorker, attr=attr1)[0]
-                rel = RelQueryByEntsAttr(attr1=attr1, attr2=attr2,
-                                         ent1_type=MaintenanceWorker, ent2_type=MaintenanceRecord,
-                                         rel_type='MaintenancePerformance')
-                res.append(rec_ent)
-                res.append(per_ent)
-                res.append(rel)
-            res = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + res)
-        return {'ok': True, 'msg': 'success', 'data': res}
-    except ValueError as e:
-        return {'ok': False, 'msg': str(e), 'data': infos }

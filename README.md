@@ -65,7 +65,14 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 然后执行：
 
 ```shell
-conda install --file requirements.txt -c pytorch -c nvidia -c conda-forge
+conda install --file requirements.txt -c pytorch -c nvidia -c conda-forge -c huggingface -c anaconda --yes
+```
+
+conda下载会比较缓慢，如果不能接受可以使用pip下载，需要先安装pytorch，然后再下载requiements.txt中的包。
+
+```shell
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
 ```
 
 接下来就可以运行了：

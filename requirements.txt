@@ -1,13 +1,12 @@
 pytorch 
 torchvision 
 torchaudio 
-pytorch-cuda=12.1 # 修改为自己的版本
+pytorch-cuda==12.1 # 如果不需要cuda，可以去掉这一行
 fastapi
 pydantic
 neomodel
 json5
 uvicorn
-openai
 transformers
 pandas
 numpy

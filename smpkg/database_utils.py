@@ -7,7 +7,6 @@ from neomodel import db, Relationship, StructuredNode, RelationshipManager, Stru
 from neomodel.exceptions import DeflateError
 
 from smpkg.capacity_profile import ProfileCapacity, Profile, ProfileFeature
-from smpkg.logger import logger
 
 
 __all__ = [
@@ -246,10 +245,9 @@ def load_excel_file_to_graph(file_path: str):
 			DETACH DELETE n
 			"""
 		)  # 删掉原先图谱中的全部内容
-	except ServiceUnavailable:
-		logger.error("[Neomodel Error] 未能连接到neo4j服务器，请检查neo4j服务器是否开启")
-		return
-	from database.maintenance_personnel import MaintenanceWorker, MaintenanceRecord, Capacity
+	except ServiceUnavailable as e:
+		raise ServiceUnavailable("[Neomodel Error] 未能连接到neo4j服务器，请检查neo4j服务器是否开启")
+	from kgdatabase.maintenance_personnel import MaintenanceWorker, MaintenanceRecord, Capacity
 
 	mapping_worker = {
 		'uid' 				: '工号/志愿者编号',
@@ -362,7 +360,7 @@ def load_excel_file_to_graph(file_path: str):
 			)
 			worker2capacity.save()
 		except DeflateError as e:
-			logger.error(e)
+			raise e
 
 
 def parse_record_to_dict(record: Union[Relationship, StructuredNode, StructuredRel]) -> Dict:
@@ -442,7 +440,7 @@ def RelQueryByEnt(ent_type: type[StructuredNode], attr: dict, rel_type: Optional
 					ret_arr.extend(RelQueryByRel(rel))
 				except AttributeError:
 					# 关系类型错误
-					logger.error(f"关系类型错误: { rel_type }")
+					raise KeyError(f"关系类型错误: { rel_type }")
 		return ret_arr
 	except DeflateError as e:
 		raise e
@@ -494,7 +492,7 @@ def RelQueryByEnts(ent1: StructuredNode, ent2: StructuredNode, rel_type: str):
 	return {"type": type(edge).__name__, "record": record}
 
 
-def get_time_key(ent_class: Union[type[StructuredNode]]):
+def get_time_key(ent_class: type[StructuredNode]):
 	r"""
 	得到类的时间属性字段
 	"""
@@ -511,11 +509,9 @@ def build_database_dataset(
 		rel_name: str,
 		capacity_cls: type[StructuredNode],
 		feature_rel_list: list[tuple[str, bool]],
-		feature_time_node_attrib_names: Optional[Union[str, list[str]]] = 'end_date',
-		feature_cls_node_attrib_names: Optional[Union[str, list[str]]] = 'name',
-		# feature_value_node_attrib_name: Optional[Union[str, list[str]]] = None,
-		# feature_cls_rel_attrib_name: Optional[Union[str, list[str]]] = None,
-		feature_value_rel_attrib_names: Optional[Union[str, list[str]]] = 'performance',
+		feature_time_node_attrib_names: Union[str, list[str]] = 'end_date',
+		feature_cls_node_attrib_names: Union[str, list[str]] = 'name',
+		feature_value_rel_attrib_names: Union[str, list[str]] = 'performance',
 		capacity_cls_attrib_name: str = 'name',
 		capacity_level_attrib_name: str = 'level'
 	) -> list[Profile]:
@@ -611,12 +607,12 @@ def build_database_dataset(
 
 
 @overload
-def collect_attrib_values_from_db(node: StructuredNode, attrib_name: str) -> list[Any]:
+def collect_attrib_values_from_db(node: type[StructuredNode], attrib_name: str) -> list[Any]:
 	...
 
 
 @overload
-def collect_attrib_values_from_db(rel: StructuredRel, rel_name: str, attrib_name: str) -> list[Any]:
+def collect_attrib_values_from_db(node: type[StructuredNode], rel_name: str, attrib_name: str) -> list[Any]:
 	...
 
 
