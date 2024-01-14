@@ -72,6 +72,18 @@ make run PYTHON=xxx ARGS='xxx=xxx yyy=yyy'
 
 ## 本项目内容
 
+### 安装neo4j
+
+neo4j是本项目使用的图数据库。
+
+可以[在这里](https://neo4j.com/product/developer-tools/)下载windows desktop版，注册账号后免费使用。linux部署则是在[官方部署网站](https://neo4j.com/deployment-center/)上按照要求部署。
+
+windows desktop部署较为简单方便，但两者都可以通过浏览器访问图形化页面。
+
+使用kgdatabase中的connect_neo4j函数连接neo4j。
+
+### 下载python依赖
+
 下载本项目依赖之前，打开requirements.txt，修改pytorch-cuda对应的cuda版本为本机对应的cuda版本，cpu运行可以不下。
 
 然后执行：
@@ -87,13 +99,15 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
+### 运行项目
+
 接下来就可以运行了：
 
 ```bash
 python main.py
 ```
 
-如果需要使用信息抽取模型，需要加载Qwen大语言模型，可以用git clone模型7b参数的模型或者是14b参数的模型，前一个需要8\~14GB显存，后一个需要13\~22GB显存，models文件夹下为默认加载路劲。
+如果需要使用信息抽取模型，需要加载Qwen大语言模型，可以用git clone模型7b参数的模型或者是14b参数的模型，前一个需要8\~14GB显存，后一个需要13\~22GB显存，models文件夹下为默认加载路径。
 
 ```shell
 git lfs clone https://www.modelscope.cn/qwen/Qwen-7B-Chat-Int4.git
@@ -102,3 +116,5 @@ git lfs clone https://www.modelscope.cn/qwen/Qwen-7B-Chat-Int4.git
 ```shell
 git lfs clone https://www.modelscope.cn/qwen/Qwen-14B-Chat-Int4.git
 ```
+
+如果想要提高一些生成速度可以参考Qwen官方文档安装flash_attn

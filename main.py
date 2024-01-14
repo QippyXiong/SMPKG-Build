@@ -11,6 +11,7 @@ from smpkg.attention_evaluator_model import VanillaCapacityEvaluatorConfig
 from smpkg.capacity_controller import CapacityGenerationController, CapacityGenerationSettings, ILogger
 from smpkg.database_utils import load_excel_file_to_graph, build_database_dataset, connect_to_neo4j, collect_attrib_values_from_db
 from server import init_local_capa_controller, init_local_llm_controller
+from smpkg.prompt import extract_json
 
 class Logger(ILogger):
     def __init__(self, max_epoch: int):
@@ -37,7 +38,7 @@ class Logger(ILogger):
 def main():
 
     connect_to_neo4j("10.181.8.236:7687", "neo4j", "neo4j_pass")
-    load_excel_file_to_graph("data/维修人员数据.xlsx")  # load data to neo4j
+    load_excel_file_to_graph("data/维保人员数据.xlsx")  # load data to neo4j
 
     # collect statics
     dynamic_cls = collect_attrib_values_from_db(MaintenanceRecord, 'malfunction')
@@ -74,56 +75,58 @@ def main():
     )
 
     # 加载configs中的model_config中包含的各个配置，从这些配置中挑选最好的模型
-    # 这会需要很长时间，可以跳过此步（76-112），直接我们已经训练好的模型 models/capacity_evaluator0
-    configs: list[VanillaCapacityEvaluatorConfig] = []
-    config_dir = Path('configs')
-    with open(config_dir.joinpath(f'model_config.json'), 'r', encoding='UTF-8') as fp:
-        load_json = json5.load(fp)
-        base_config = load_json['base_config']
-        test_cases = load_json['test_cases']
+    # 这会需要很长时间，可以跳过此步（76-112），直接加载我们已经训练好的模型 models/capacity_evaluator0
+    # configs: list[VanillaCapacityEvaluatorConfig] = []
+    # config_dir = Path('configs')
+    # with open(config_dir.joinpath(f'model_config.json'), 'r', encoding='UTF-8') as fp:
+    #     load_json = json5.load(fp)
+    #     base_config = load_json['base_config']
+    #     test_cases = load_json['test_cases']
 
-        for test_case in test_cases:
-            temp_config: dict = copy(base_config)
-            temp_config.update(test_case)
-            configs.append(VanillaCapacityEvaluatorConfig(**temp_config))
+    #     for test_case in test_cases:
+    #         temp_config: dict = copy(base_config)
+    #         temp_config.update(test_case)
+    #         configs.append(VanillaCapacityEvaluatorConfig(**temp_config))
 
-    logger = Logger(configs[0].num_epochs)
-    controller = CapacityGenerationController(settings, configs[0], logger)
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # logger = Logger(configs[0].num_epochs)
+    # controller = CapacityGenerationController(settings, configs[0], logger)
+    # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('reports', exist_ok=True)
+    # os.makedirs('models', exist_ok=True)
+    # os.makedirs('reports', exist_ok=True)
     
-    best_f1 = 0.
-    best_idx = 0
-    for i, config in enumerate(configs):
-        controller.init_model(config)
-        controller.logger.clear(config.num_epochs)
-        controller.train_model(profiles, max_time, device, 1)
-        controller.save(path=f'models/capacity_evaluator{i}')
-        report = controller.predicate(profiles, max_time, False, True, False)
-        report['final_time_param'] = controller.model.time_param.item()
-        f1_score = report['weighted avg']['f1-score']
-        if f1_score > best_f1:
-            best_idx = i
-            best_f1 = f1_score
-        with open(f'reports/report_case{i}.json', 'w', encoding='UTF-8') as fp:
-            json5.dump(report, fp, indent=4, quote_keys=True, trailing_commas=False)
+    # best_f1 = 0.
+    # best_idx = 0
+    # for i, config in enumerate(configs[:1]):
+    #     controller.init_model(config)
+    #     controller.logger.clear(config.num_epochs)
+    #     controller.train_model(profiles, max_time, device, 1)
+    #     controller.save(path=f'models/capacity_evaluator{i}')  # 保存模型到指定路径
+    #     report = controller.predicate(profiles, max_time, False, True, False)  # 返回模型验证报告
+    #     report['final_time_param'] = controller.model.time_param.item()  # 记录模型最终的时间参数
+    #     f1_score = report['weighted avg']['f1-score']  # 取f1分数作为考量模型效果的指标
+    #     if f1_score > best_f1:
+    #         best_idx = i
+    #         best_f1 = f1_score
+    #     with open(f'reports/report_case{i}.json', 'w', encoding='UTF-8') as fp:
+    #         json5.dump(report, fp, indent=4, quote_keys=True, trailing_commas=False)
 
-    print(f'best config for config{ best_idx } f1-score: {best_f1}')
+    # print(f'best config for config{ best_idx } f1-score: {best_f1}')
 
-    # 随机采样10个样本查看实际预测的效果
-    con = CapacityGenerationController.load(f'models/capacity_evaluator{best_idx}')
+    # 加载模型，并随机采样10个样本查看实际预测的效果，这里加载的是我们训练好的模型 models/capacity_evaluator0
+    con = CapacityGenerationController.load(f'models/capacity_evaluator0')
     import numpy as np
     indices = np.random.choice(len(profiles), 10)
-    pred_profiles = [ profiles[i] for i in indices ]
+    pred_profiles = [ profiles[i] for i in indices ]  # 随机采样10个样本
     pre_capas = con.predicate(pred_profiles, max_time)
+    # 查看预测结果与真实结果是否有误
     print('pre_capas', *pre_capas, sep='\n')
     print('tru_capas', *[ profiles[i].capacities for i in indices ], sep='\n')
 
     # 初始化两个控制器，分别用于信息处理和能力生成，用于webserver
-    # 加载信息处理需要 14~22 GB GPU memory 运行功能，注意选择合适的device
-    init_local_llm_controller("models/Qwen-14B-Chat-Int4", device=torch.device('cuda:1'))
+    # 加载信息处理模型需要 14~22 GB GPU memory 运行功能，注意选择合适的device
+    llm_con = init_local_llm_controller("models/Qwen-14B-Chat-Int4", device=torch.device('cuda:1'))
+    llm_con.load()
     # 加载能力生成即当前模型， 少于 4 GB GPU memory
     con.move_model(torch.device('cuda:0'))
     init_local_capa_controller(con)

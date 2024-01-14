@@ -163,6 +163,8 @@ class CapacityGenerationController:
             weight_decay=0.1,
             dropout=0.1,
             warming_up_proportion=0.1,
+            alpha=1e-3,
+            beta=1e-3,
 
             # embeddings
             num_capacity_cls=len(self.settings.capacity_names),
@@ -409,6 +411,10 @@ class CapacityGenerationController:
         """
         self.model.eval()
         # dataset pad setting
+        for profile in profiles:
+            if not profile.capacities:
+                profile.capacities = [ProfileCapacity(capacity_name=name) for name in self.settings.capacity_names]
+
         if len(profiles) == 1:
             pad_setting = None
         else:
@@ -437,7 +443,7 @@ class CapacityGenerationController:
 
         if batch_size is None:
             batch_size = ( 
-                len(pred_dataset) if len(pred_dataset) < self.default_config.batch_size
+                len(pred_dataset) if len(pred_dataset) < self.model.config.batch_size
                 else self.default_config.batch_size
             )
 

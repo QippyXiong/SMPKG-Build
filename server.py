@@ -14,8 +14,8 @@ from smpkg.llm import LocalLLMController
 from smpkg.capacity_controller import CapacityGenerationController
 from smpkg.database_utils import (EntityQueryByAtt, RelQueryByEnt, getRelEnt, CreateEnt,
                                   handle_time_key, CreateRel, UpdateEnt, UpdateRel, DeleteEnt, DeleteRel,
-                                  RelQueryByEntsAttr, get_persons_profiles)
-from smpkg.prompt import InformationExtractionArrayPrompt, PromptDateFormatConstraint
+                                  RelQueryByEntsAttr, get_persons_profiles, parse_record_to_dict)
+from smpkg.prompt import InformationExtractionArrayPrompt, PromptDateFormatConstraint, PromptSelectedValueConstraint
 
 
 app = FastAPI()
@@ -420,30 +420,33 @@ malfuncs = [
     "监视系统故障"    ,
 ]
 
-
-def GenerateMulRecordByRecord(record: dict) -> tuple[bool, str]:
-    if "malfunc" not in record.keys() or record["malfunc"] not in malfuncs:
-        return False, "维修故障不存在"
-    if "person" not in record.keys():
-        return False, "维修人员字段缺失"
-    person = MaintenanceWorker.nodes.filter(name=record["person"])
-    if person.__len__() == 0:
-        return False, "维修人员不存在"
-    if person.__len__() > 1:
-        return False, "维修人员不唯一"
-    attr = {"malfunction": record["malfunc"], "place": record["place"],
-            "malfunc_time": record["begin_time"], "begin_time": record["begin_time"],
-            "complish_time": record["end_time"]}
-    malrecord, _ = CreateEnt(MaintenanceRecord, attr)
-    if malrecord is None:
-        attr = handle_time_key(MaintenanceRecord, attr)
-        malrecord = MaintenanceRecord.nodes.get(**attr)
-    rel: RelationshipManager = getattr(person[0], 'MaintenancePerformance')
-    if_exist_edge = rel.relationship(malrecord)
-    if if_exist_edge is None:
-        CreateRel(person[0], malrecord, MaintenancePerformance, attr={"performance": "正常"})
-    return True, "维修记录更新成功"
-
+similary_malfuncs = {
+    "轨道损坏"        :     "轨道损坏"        ,
+    "轮胎车轴故障"    :     "轮胎车轴故障"    ,
+    "车门故障"        :     "车门故障"        ,
+    "照明损坏"        :     "照明损坏"        ,
+    "空调故障"        :     "空调故障"        ,
+    "制动系统故障"    :     "制动系统故障"    ,
+    "排水沟损坏"      :     "排水沟损坏"      ,
+    "排水系统堵塞"    :     "排水系统堵塞"    ,
+    "通风系统堵塞"    :     "通风系统堵塞"    ,
+    "烟雾报警器故障"  :     "烟雾报警器故障"  ,
+    "紧急停车系统故障":     "紧急停车系统故障",
+    "自动售票机故障"  :     "自动售票机故障"  , 
+    "安检设备故障"    :     "安检设备故障"    ,
+    "闸机故障"        :     "闸机故障"        , 
+    "电梯故障"        :     "电梯故障"        ,
+    "扶梯故障"        :     "扶梯故障"        ,
+    "电力系统故障"    :     "电力系统故障"    ,
+    "地铁信号故障"    :     "地铁信号故障"    ,
+    "监视系统故障"    :     "监视系统故障"    ,
+    "铁轨损坏": "轨道损坏",
+    "铁轨破损": "轨道损坏",
+    "车轮损坏": "轮胎车轴故障",
+    "车辆车轮损坏": "轮胎车轴故障",
+    "车辆车轮故障": "轮胎车轴故障",
+    "车窗故障" : "车门故障"
+}
 
 example_outputs = [{
     "姓名": "王卫国",
@@ -464,6 +467,7 @@ example_outputs = [{
     "结束时间": "2021-05-21 10:00:00",
     "持续时间": "2小时"
 }]
+
 item_keys = {
     "姓名": "维修人员名称",
     "岗位": "人员的岗位",
@@ -474,6 +478,7 @@ item_keys = {
     "结束时间": "维修结束时间",
     "持续时间": "维修持续时间"
 }
+
 prompt = InformationExtractionArrayPrompt(
     description='从地铁人员维修记录本文中提取出这个记录中包含的人物、他们的岗位、他们完成的维修内容、此次维修所在的地点、维修开始时间、维修结束时间、维修持续时间。',
     info_names=['姓名', '岗位', '故障类型', '维修内容', '地点', '开始时间', '结束时间', '持续时间'],
@@ -484,6 +489,7 @@ prompt = InformationExtractionArrayPrompt(
         # PromptTypeConstraint('malfunc', str),
         # PromptTypeConstraint('content', str),
         # PromptTypeConstraint('place', str),
+        PromptSelectedValueConstraint("故障类型", malfuncs),
         PromptDateFormatConstraint('%Y-%m-%d %H:%M:%S', 'begin_time'),
         PromptDateFormatConstraint('%Y-%m-%d %H:%M:%S', 'end_time'),
         # PromptTypeConstraint('duration', str),
@@ -493,8 +499,53 @@ prompt = InformationExtractionArrayPrompt(
 )
 
 
-@app.websocket('/llm/local/')
-async def local_LLM_info_extraction(websocket: WebSocket):
+def GenerateMulRecordByRecord(record: dict) -> tuple[bool, str]:
+    record_type = None
+    if not isinstance(record, dict):
+        return False, f'parse fail', None
+    if "故障类型" not in record.keys():
+        return False, f'parse fail', None
+    if isinstance(record["故障类型"], str) and '，' in record["故障类型"]:
+        record["故障类型"] = record["故障类型"].split('，')
+    if isinstance(record["故障类型"], str) and ',' in record["故障类型"]:
+        record["故障类型"] = record["故障类型"].split(',')
+    if isinstance(record["故障类型"], list):
+        for rec_t in record["故障类型"]:
+            record_type = similary_malfuncs.get(rec_t, None)
+            if record_type is not None:
+                break
+    else:
+        record_type = similary_malfuncs.get(record["故障类型"], None)
+    if not record_type:
+        return False, f'记录中无故障类型{record["故障类型"]}', None
+    if record_type not in malfuncs:
+        return False, f'维修故障{record["故障类型"]}不存在', None
+    if "姓名" not in record.keys():
+        return False, "维修人员字段缺失", None
+    person = MaintenanceWorker.nodes.filter(name=record["姓名"])
+    if person.__len__() == 0:
+        return False, f'维修人员{record["姓名"]}不存在'
+    if person.__len__() > 1:
+        return False, "维修人员不唯一", None
+    attr = {"malfunction": record_type, "place": record["地点"],
+            "malfunc_time": record["开始时间"], "begin_time": record["开始时间"],
+            "complish_time": record["结束时间"]}
+    malrecord, msg = CreateEnt(MaintenanceRecord, attr, major_keys=["malfunction", "place", "malfunc_time"])
+    if malrecord is None:
+        return False, f"维修记录创建失败，原因：{msg}", None
+    rel: RelationshipManager = getattr(person[0], 'MaintenancePerformance')
+    if_exist_edge = rel.relationship(malrecord)
+    if if_exist_edge is None:
+        CreateRel(person[0], malrecord, MaintenancePerformance, attr={"performance": "正常"})
+    return True, "维修记录更新成功", (person[0], malrecord)
+
+
+class ExtractData(BaseModel):
+    text: str
+
+
+@app.post('/llm/local/')
+async def local_LLM_info_extraction(data: ExtractData):
     r"""
     webserver post api for calling LLM for extracting maintainance record
 
@@ -510,32 +561,31 @@ async def local_LLM_info_extraction(websocket: WebSocket):
     if not local_capa_controller:
         return {'ok': False, 'msg': 'local capa controller not init yet!', 'data': None}
 
-    record: dict = websocket.receive_json()
-    content = record['text']
-
-    generator = local_llm_controller.info_extraction_task_stream(prompt, content)
-
-    sentence = ''
-    for sentence in generator:
-        await websocket.send_json({'ok': True, 'msg': 'success', 'data': sentence})
-
-    infos = local_llm_controller.extract_json_array_from_str(sentence)
-
+    sentence = data.text
+    # 需要很长的时间，可能开子线程处理，直接返回，后续更新完再查看会更好
+    infos, _ = local_llm_controller.info_extraction(prompt, sentence)
+    fail_msgs = []
     try:
         res = list()
         if not isinstance(infos, list):
             return {'ok': False, 'msg': 'parse fail', 'data': infos}
         for info in infos:
-            ok, msg = GenerateMulRecordByRecord(info)
+            ok, msg, ents = GenerateMulRecordByRecord(info)
             if not ok:
-                return {'ok': False, 'msg': msg, 'data': infos}
+                fail_msgs.append(msg)
+                continue
+            elif ents is None:
+                continue
             else:
-                attr1 = {"name": info["姓名"]}
-                attr2 = {"malfunction": info["故障类型"],
-                         "place": info["地点"],
-                         "malfunc_time": info["开始时间"]}
-                rec_ent = EntityQueryByAtt(ent_type=MaintenanceRecord, attr=attr2)[0]
-                per_ent = EntityQueryByAtt(ent_type=MaintenanceWorker, attr=attr1)[0]
+                # attr1 = {"name": info["姓名"]}
+                # attr2 = {"malfunction": info["故障类型"],
+                #          "place": info["地点"],
+                #          "malfunc_time": info["开始时间"]}
+                # rec_ent = EntityQueryByAtt(ent_type=MaintenanceRecord, attr=attr2)[0]
+                # per_ent = EntityQueryByAtt(ent_type=MaintenanceWorker, attr=attr1)[0]
+                per_ent, rec_ent = ents
+                attr1 = {"name": per_ent.name}
+                attr2 = {"malfunction": rec_ent.malfunction, "place": rec_ent.place, "malfunc_time": rec_ent.malfunc_time }
                 profiles = get_persons_profiles(
                     MaintenanceWorker,
                     attr1,
@@ -554,10 +604,13 @@ async def local_LLM_info_extraction(websocket: WebSocket):
                 rel = RelQueryByEntsAttr(attr1=attr1, attr2=attr2,
                                          ent1_type=MaintenanceWorker, ent2_type=MaintenanceRecord,
                                          rel_type='MaintenancePerformance')
-                res.append(rec_ent)
-                res.append(per_ent)
+                
+                res.append({ "type": "MaintenanceRecord", "record": parse_record_to_dict(rec_ent) })
+                res.append({ "type": "MaintenanceWorker", "record": parse_record_to_dict(per_ent)})
                 res.append(rel)
-            res = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + res)
-        return {'ok': True, 'msg': 'update person record and capacities', 'data': res}
+        res = reduce(lambda x, y: x + [y] if y not in x else x, [[], ] + res)
+        if len(fail_msgs) == len(infos):  # all fail
+            return {'ok': False, 'msg': str(fail_msgs), 'data': infos }
+        return {'ok': True, 'msg': 'update person record and capacities', 'data': res }
     except ValueError as e:
         return {'ok': False, 'msg': str(e), 'data': infos}

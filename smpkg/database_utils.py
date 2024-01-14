@@ -353,6 +353,8 @@ def load_excel_file_to_graph(file_path: str):
 			capacity = Capacity(**data_dict)
 			capacity.save()
 		try:
+			if not isinstance(row_dict['维保人员工号'], str):
+				continue
 			worker2capacity = capacity.CapacityRate.connect(
 				MaintenanceWorker.nodes.get(uid=row_dict['维保人员工号']),
 				{

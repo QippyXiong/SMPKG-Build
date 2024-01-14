@@ -103,13 +103,14 @@ class LocalLLMController:
 		if self.model is None:
 			raise ValueError('model not loaded')
 		json_str, _ = self.model.chat(self.tokenizer, prompt(sentence), None)
-		return self.extract_json_array_from_str(json_str)
+		return self.extract_json_array_from_str(json_str), json_str
 
 	@staticmethod
 	def extract_json_array_from_str(content: str) -> Union[dict, list, None]:
 		r = extract_json(content)
 		if not r:
 			return None
+		return r
 	
 	def release(self) -> None:
 		del self.model

@@ -44,7 +44,7 @@ class PromptSelectedValueConstraint:
 	values: list[str]
 
 	def __str__(self) -> str:
-		return f'对于数组中单个元素的字段{ self.key_name }，它的值只能为{ self.values }中的其中之一。'
+		return f'需要注意的是，对于数组中单个元素的字段{ self.key_name }，它的值只能为字符串数组{ self.values }中的一个字符串。'
 
 
 @dataclass
@@ -151,7 +151,7 @@ def extract_json(string: str, encoding='UTF-8') -> Union[dict, list, None]:
 	"""
 	stack = []
 	result = {}
-	for i in range(len(str)):
+	for i in range(len(string)):
 		if string[i] == '{' or string[i] == '[':
 			stack.append((string[i], i))
 		
@@ -163,7 +163,7 @@ def extract_json(string: str, encoding='UTF-8') -> Union[dict, list, None]:
 			
 			if char == '{':  # matched, parse
 				try:
-					result = json5.loads(str[idx: i+1], encoding=encoding)
+					result = json5.loads(string[idx: i+1], encoding=encoding)
 				except Exception:
 					stack = []  # parse fail, this not json, that mean all before i cannot be json
 			else:  # that mean it's '[', all these context are errored
